@@ -61,15 +61,15 @@ int framebuffer_init(void)
     mailbox[34] = 0;
 
     if (!mailbox_call(MAILBOX_FB_CHANNEL) || mailbox[1] != 0x80000000u ||
-        (mailbox[20] & 0x80000000u) == 0 || mailbox[23] == 0 ||
-        (mailbox[25] & 0x80000000u) == 0 || mailbox[28] == 0) {
+        mailbox[22] != 0x80000008u || mailbox[23] == 0 ||
+        mailbox[27] != 0x80000004u || mailbox[28] == 0) {
         return 0;
     }
 
     fb_width = mailbox[5];
     fb_height = mailbox[6];
-    fb_pitch = mailbox[33];
-    pixels = (volatile uint32_t *)(uintptr_t)(mailbox[28] & 0x3FFFFFFFu);
+    fb_pitch = mailbox[28];
+    pixels = (volatile uint32_t *)(uintptr_t)(mailbox[23] & 0x3FFFFFFFu);
     return pixels != 0 && fb_pitch >= fb_width * 4u && fb_width >= FB_WIDTH && fb_height >= FB_HEIGHT;
 }
 
