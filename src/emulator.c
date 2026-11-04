@@ -1,26 +1,13 @@
-#ifndef EMULATOR_H
-#define EMULATOR_H
-
-#include <stdint.h>
-
-enum emulator_system {
-    EMU_GB,
-    EMU_GBC,
-    EMU_GBA,
-    EMU_NDS,
-    EMU_NDSI,
-    EMU_SYSTEM_COUNT
+#include "emulator.h"
+static const struct emulator_profile profiles[EMU_SYSTEM_COUNT] = {
+    { EMU_GB, "Game Boy", 8, 0 },
+    { EMU_GBC, "Game Boy Color", 8, 0 },
+    { EMU_GBA, "Game Boy Advance", 32, 0 },
+    { EMU_NDS, "Nintendo DS", 512, 0 },
+    { EMU_NDSI, "Nintendo DSi", 512, 0 }
 };
-
-struct emulator_profile {
-    enum emulator_system system;
-    const char *name;
-    uint32_t rom_header_size;
-    uint32_t max_rom_size_mb;
-    int is_supported;
-};
-
-void emulator_init(void);
-const struct emulator_profile *emulator_get_profile(enum emulator_system system);
-
-#endif
+const struct emulator_profile *emulator_get_profile(enum emulator_system system)
+{
+    if ((unsigned)system >= EMU_SYSTEM_COUNT) return 0;
+    return &profiles[system];
+}

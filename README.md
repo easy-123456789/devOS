@@ -1,64 +1,34 @@
-# Raspberry Pi 3B+ Bare-Metal Emulator
+# Bare-metal Raspberry Pi 3B+ screen console
 
-This repository is a minimal bare-metal project skeleton for a Raspberry Pi 3B+ that is meant to boot directly without a desktop OS and provide the foundation for emulating:
+This is the first bootable milestone: it starts directly on a Raspberry Pi 3B+ and draws a text console to an HDMI display using the firmware framebuffer mailbox. It is not yet a game emulator and does not include ROMs, BIOS files, or third-party libraries.
 
-- Game Boy (GB)
-- Game Boy Color (GBC)
-- Game Boy Advance (GBA)
-- Nintendo DS (NDS)
-- Nintendo DSi (NDSi)
+## Build
 
-This is intentionally a low-level starting point, not a complete ROM-ready emulator. It contains:
+Install an AArch64 bare-metal toolchain (`aarch64-none-elf-gcc` and matching binutils), then run:
 
-- a Raspberry Pi 3B+ AArch64 boot entry
-- a minimal serial console
-- a simple memory-mapped I/O layer
-- a platform/emulator registry for future system cores
-- the framework needed to add GB/GBC/GBA/NDS cores later
-
-Important limitations:
-
-- This is not a full ROM loader or legal BIOS ROM bundle.
-- NDS/DSi emulation is significantly heavier than GB/GBC/GBA and will require a much more complete emulation engine and a stronger platform than a Pi 3B+ is designed to provide.
-- The repository intentionally avoids external libraries and keeps the code self-contained.
-
-## Directory layout
-
-- `src/boot.S` - kernel entry point and early boot code
-- `src/kernel.c` - main kernel loop and system startup
-- `src/uart.c` / `src/uart.h` - UART serial console for debugging
-- `src/console.c` / `src/console.h` - print helpers
-- `src/mmio.h` - MMIO helper functions
-- `src/emulator.c` / `src/emulator.h` - system profile registry
-- `linker.ld` - linker script for the Pi 3B+ boot image
-- `Makefile` - cross-build instructions
-
-## Build requirements
-
-You need an ARM cross toolchain, typically one of:
-
-- `aarch64-linux-gnu-gcc`
-- `clang --target=aarch64-none-elf`
-- `arm-none-eabi-gcc`
-
-Then run:
-
-```bash
+```sh
+make clean
 make
 ```
 
-The result is a `kernel8.img` boot image that can be placed on an SD card for a Raspberry Pi 3B+.
+This produces `kernel8.img` and `config.txt`. Copy both files to the root of a FAT32-formatted SD card containing the Raspberry Pi 3B+ boot firmware files (`start.elf` and `fixup.dat`), then boot the Pi with an HDMI display attached. A build machine is required; this repository does not build itself on the Pi.
 
-## Usage notes
+The screen should show a blue title bar and a black console with startup/status lines. If framebuffer allocation fails, the kernel intentionally halts; connect a 3.3V USB-to-TTL serial adapter to GPIO14/GPIO15 (115200 8N1) for diagnostics once serial support is added.
 
-This project is intentionally designed as a framework for further work. The next steps would be:
+## Current scope
 
-1. Add robust ROM scan/load code for files stored on external media.
-2. Add CPU emulation backends for GB/GBC/GBA.
-3. Add graphics pipeline and framebuffer abstractions.
-4. Add controller input polling.
-5. Add DS/DSi core optimizations or move to stronger hardware.
+- AArch64 boot entry, BSS initialization, and stack setup
+- Raspberry Pi 3 mailbox framebuffer request (640×480, 32-bit)
+- Minimal built-in 5×7 text renderer and onscreen console
+- No OS, runtime library, ROM loader, or emulator core yet
 
-## Legal note
+The Pi 3B+ is the target hardware. GB/GBC/GBA emulation and then DS/DSi support are future work; DS/DSi performance on this hardware is not guaranteed. Use only game and firmware data you are legally authorized to use.
 
-Use only ROMs and BIOS data that you legally own and are authorized to use. This project does not distribute any ROMs or system files.
+## Files
+
+- `src/boot.S`: kernel entry point
+- `src/kernel.c`: startup screen
+- `src/framebuffer.c`, `src/framebuffer.h`: mailbox framebuffer and drawing
+- `src/font.c`, `src/font.h`: compact built-in glyphs
+- `src/console.c`, `src/console.h`: screen text console
+- `Makefile`, `linker.ld`, `config.txt`: build and Pi boot configuration

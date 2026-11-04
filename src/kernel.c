@@ -1,18 +1,35 @@
 #include "console.h"
-#include "uart.h"
+#include "framebuffer.h"
 
-void console_write(const char *text)
+void kernel_main(void)
 {
-    uart_puts(text);
-}
+    if (!framebuffer_init()) {
+        for (;;) {
+            __asm__ volatile("wfe");
+        }
+    }
 
-void console_putc(char ch)
-{
-    uart_putc(ch);
-}
+    console_init();
+    console_write("RPI 3B+  |  BARE-METAL CONSOLE");
+    console_newline();
+    console_newline();
+    console_write("Booted directly on the Raspberry Pi.");
+    console_newline();
+    console_write("Display: HDMI framebuffer 640 x 480.");
+    console_newline();
+    console_newline();
+    console_write("PROJECT STATUS");
+    console_newline();
+    console_write("[OK] Bare-metal kernel started");
+    console_newline();
+    console_write("[OK] Framebuffer initialized");
+    console_newline();
+    console_write("[--] Emulator cores are not implemented yet");
+    console_newline();
+    console_newline();
+    console_write("Next: input, SD storage, then GB/GBC core.");
 
-void console_writeln(const char *text)
-{
-    uart_puts(text);
-    uart_putc('\n');
+    for (;;) {
+        __asm__ volatile("wfe");
+    }
 }
