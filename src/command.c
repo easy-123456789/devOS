@@ -1,7 +1,16 @@
 #include "command.h"
+#include "mmio.h"
 #include "uart.h"
 
 #define LINE_CAPACITY 80u
+
+#define PM_BASE                     0x3F100000u
+#define PM_RSTC                     (PM_BASE + 0x1Cu)
+#define PM_WDOG                     (PM_BASE + 0x24u)
+#define PM_PASSWORD                 0x5A000000u
+#define PM_RSTC_WRCFG_MASK          (3u << 4)
+#define PM_RSTC_WRCFG_FULL_RESET    (2u << 4)
+#define PM_WDOG_TIMEOUT             10u
 
 static int is_space(char ch)
 {
@@ -33,13 +42,24 @@ static void print_help(void)
 
 static void run_reboot(void)
 {
-    uart_puts("Rebooting...\n");
+    uint32_t reset_control;
 
-    /*
-     * A real hardware reboot would reset the SoC or trigger the watchdog.
-     * This stub keeps the shell behavior consistent until the platform reset
-     * code is implemented.
-     */
+    uart_puts("Rebooting...\n");
+    uart_flush();
+
+    /* BCM2837 PM watchdog reset: configure it to reset the full SoC. */
+    reset_control = mmio_read32(PM_RSTC);
+    reset_control &= ~PM_RSTC_WRCFG_MASK;
+    reset_control |= PM_PASSWORD | PM_RSTC_WRCFG_FULL_RESET;
+
+    mmio_write32(PM_WDOG, PM_PASSWORD | PM_WDOG_TIMEOUT);
+    mmio_write32(PM_RSTC, reset_control);
+    __asm__ volatile("dsb sy" ::: "memory");
+
+    /* The watchdog should reset the board; do not return to the shell. */
+    for (;;) {
+        __asm__ volatile("wfe");
+    }
 }
 
 static void run_command(const char *line)

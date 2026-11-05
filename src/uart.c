@@ -14,8 +14,10 @@
 #define UART0_CR        (*(volatile uint32_t *)(UART0_BASE + 0x30u))
 #define UART0_ICR       (*(volatile uint32_t *)(UART0_BASE + 0x44u))
 
+#define UART_FR_BUSY    (1u << 3)
 #define UART_FR_RXFE    (1u << 4)
 #define UART_FR_TXFF    (1u << 5)
+#define UART_FR_TXFE    (1u << 7)
 
 static void uart_write_raw(char ch)
 {
@@ -64,6 +66,14 @@ void uart_puts(const char *str)
 {
     while (*str) {
         uart_putc(*str++);
+    }
+}
+
+void uart_flush(void)
+{
+    while ((UART0_FR & UART_FR_TXFE) == 0u ||
+           (UART0_FR & UART_FR_BUSY) != 0u) {
+        __asm__ volatile("nop");
     }
 }
 
