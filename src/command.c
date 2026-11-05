@@ -1,10 +1,6 @@
 #include "command.h"
-#include "framebuffer.h"
 #include "mmio.h"
-#include "picture.h"
 #include "uart.h"
-
-#include <stdint.h>
 
 #define LINE_CAPACITY 80u
 
@@ -16,7 +12,8 @@
 #define PM_RSTC_WRCFG_FULL_RESET    (2u << 4)
 #define PM_WDOG_TIMEOUT             10u
 
-extern uint32_t asm_demo(void);
+/* Only routines linked into the kernel are callable from the shell. */
+extern unsigned asm_demo(void);
 
 static int is_space(char ch)
 {
@@ -40,31 +37,25 @@ static int command_equals(const char *start, unsigned length, const char *word)
 static void print_help(void)
 {
     uart_puts("Commands:\n");
-    uart_puts("  help     Show this help\n");
-    uart_puts("  status   Show current project status\n");
-    uart_puts("  systems  List planned emulator systems\n");
-    uart_puts("  image    Show a PNG image from the SD card on the video output\n");
-    uart_puts("  asm      Run the assembly demo routine\n");
-    uart_puts("  reboot   Restart the emulator shell\n");
+    uart_puts("  help        Show this help\n");
+    uart_puts("  status      Show current project status\n");
+    uart_puts("  systems     List planned emulator systems\n");
+    uart_puts("  run <name>  Run a built-in assembly routine (demo)\n");
+    uart_puts("  reboot      Restart the emulator shell\n");
 }
 
-static void run_image(void)
+static void run_assembly_command(const char *name, unsigned length)
 {
-    uint32_t x = (framebuffer_width() - 320u) / 2u;
-    uint32_t y = (framebuffer_height() - 240u) / 2u;
-
-    if (!picture_load_sd_png("image.png", x, y)) {
-        uart_puts("No image could be rendered from the SD card.\n");
+    if (command_equals(name, length, "demo")) {
+        unsigned result = asm_demo();
+        if (result == 42u) {
+            uart_puts("Built-in assembly demo returned 42.\n");
+        } else {
+            uart_puts("Built-in assembly demo returned an unexpected value.\n");
+        }
+    } else {
+        uart_puts("Unknown built-in routine. Available: demo\n");
     }
-}
-
-static void run_asm_demo(void)
-{
-    uint32_t result = asm_demo();
-
-    uart_puts("Assembly routine returned ");
-    uart_putc((char)('0' + (result % 10u)));
-    uart_puts(".\n");
 }
 
 static void run_reboot(void)
@@ -105,15 +96,40 @@ static void run_command(const char *line)
     }
 
     length = end - start;
-
     if (length == 0) {
         return;
     }
 
-    /* This first draft accepts commands without arguments. */
     while (is_space(line[end])) {
         ++end;
     }
+
+    if (command_equals(&line[start], length, "run")) {
+        unsigned name_start = end;
+        unsigned name_end;
+
+        if (line[name_start] == '\0') {
+            uart_puts("Usage: run <name> (available: demo)\n");
+            return;
+        }
+
+        name_end = name_start;
+        while (line[name_end] != '\0' && !is_space(line[name_end])) {
+            ++name_end;
+        }
+        end = name_end;
+        while (is_space(line[end])) {
+            ++end;
+        }
+        if (line[end] != '\0') {
+            uart_puts("Usage: run <name>\n");
+            return;
+        }
+
+        run_assembly_command(&line[name_start], name_end - name_start);
+        return;
+    }
+
     if (line[end] != '\0') {
         uart_puts("This command takes no arguments.\n");
         return;
@@ -131,10 +147,6 @@ static void run_command(const char *line)
         uart_puts("Game Boy Color: planned\n");
         uart_puts("Game Boy Advance: header checker only\n");
         uart_puts("Nintendo DS / DSi: prototype plans\n");
-    } else if (command_equals(&line[start], length, "image")) {
-        run_image();
-    } else if (command_equals(&line[start], length, "asm")) {
-        run_asm_demo();
     } else if (command_equals(&line[start], length, "reboot")) {
         run_reboot();
     } else {
