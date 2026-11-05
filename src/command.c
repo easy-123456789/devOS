@@ -1,7 +1,10 @@
-#include "command.h"
-#include "mmio.h"
-#include "uart.h"
+#include "framebuffer.h"
+#include "png_image.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
+#define FB_BLACK 0x00000000u
 #define LINE_CAPACITY 80u
 
 #define PM_BASE                     0x3F100000u
@@ -37,7 +40,25 @@ static void print_help(void)
     uart_puts("  help     Show this help\n");
     uart_puts("  status   Show current project status\n");
     uart_puts("  systems  List planned emulator systems\n");
+    uart_puts("  image    Display the embedded PNG image\n");
     uart_puts("  reboot   Restart the emulator shell\n");
+}
+
+static void run_image(void)
+{
+    uint32_t width = png_image_width;
+    uint32_t height = png_image_height;
+
+    if (width == 0 || height == 0 || png_image_pixels == NULL) {
+        uart_puts("No embedded PNG. Generate src/png_image.c with tools/png_to_c.py.\n");
+        return;
+    }
+
+    framebuffer_clear(FB_BLACK);
+    framebuffer_blit((framebuffer_width() - width) / 2u,
+                     (framebuffer_height() - height) / 2u,
+                     width, height, png_image_pixels);
+    uart_puts("PNG displayed. Reset to return to the console.\n");
 }
 
 static void run_reboot(void)
@@ -83,7 +104,7 @@ static void run_command(const char *line)
         return;
     }
 
-    /* This first draft accepts commands without arguments. */
+    /* Commands currently accept no arguments. */
     while (is_space(line[end])) {
         ++end;
     }
@@ -104,6 +125,8 @@ static void run_command(const char *line)
         uart_puts("Game Boy Color: planned\n");
         uart_puts("Game Boy Advance: header checker only\n");
         uart_puts("Nintendo DS / DSi: prototype plans\n");
+    } else if (command_equals(&line[start], length, "image")) {
+        run_image();
     } else if (command_equals(&line[start], length, "reboot")) {
         run_reboot();
     } else {

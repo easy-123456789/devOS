@@ -85,6 +85,23 @@ void framebuffer_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, u
     }
 }
 
+void framebuffer_blit(uint32_t x, uint32_t y, uint32_t width, uint32_t height,
+                      const uint32_t *source)
+{
+    if (!pixels || !source || x >= fb_width || y >= fb_height) return;
+    if (width > fb_width - x) width = fb_width - x;
+    if (height > fb_height - y) height = fb_height - y;
+
+    for (uint32_t row = 0; row < height; ++row) {
+        volatile uint32_t *destination = (volatile uint32_t *)
+            ((uintptr_t)pixels + (uintptr_t)(y + row) * fb_pitch);
+        const uint32_t *source_row = source + (uintptr_t)row * width;
+        for (uint32_t col = 0; col < width; ++col) {
+            destination[x + col] = source_row[col];
+        }
+    }
+}
+
 void framebuffer_clear(uint32_t color)
 {
     framebuffer_rect(0, 0, fb_width, fb_height, color);
