@@ -1,20 +1,25 @@
-# Bare-metal Raspberry Pi 3B+ screen console
+# Bare-metal Raspberry Pi 3B+ console with USB keyboard
 
-This is a bootable AArch64 bare-metal console for Raspberry Pi 3B+. The default `make` target builds the existing C kernel. It accepts shell input through UART; its current firmware does not include USB host/HID keyboard support.
+The default build creates an AArch64 bare-metal firmware image for Raspberry Pi 3B+ with USB HID keyboard support, using Circle's DWC2 host controller, built-in hub, and keyboard driver. It provides a small keyboard-driven shell (`help`, `status`, `systems`, `reboot`) on the HDMI display.
 
-To build the alternate Circle-based USB keyboard firmware, see [`circle-usb/README.md`](circle-usb/README.md). That build supports a directly connected USB HID keyboard through the Pi's USB host controller and hub, and echoes keypresses to HDMI. It replaces the existing console image while installed; restore the original `kernel8.img` to return to the UART shell.
+## Build the default USB-keyboard firmware
 
-## Build the original C console
-
-Install an AArch64 bare-metal toolchain (`aarch64-none-elf-gcc` and matching binutils), then run:
+Install `aarch64-none-elf-gcc` and matching binutils, GNU make, and Git. From the repository root run:
 
 ```sh
-make clean
 make
 ```
 
-This produces `kernel8.img` and `config.txt`.
+The build automatically fetches Circle at a pinned revision into `vendor/circle`, builds its libraries, then writes the USB-enabled `kernel8.img` to the repository root. See [`circle-usb/README.md`](circle-usb/README.md) for installation details. Copy `kernel8.img`, `config.txt`, and Raspberry Pi boot firmware files to the SD card's boot partition. Back up the existing `kernel8.img` first; this is a bare-metal firmware image, not a Linux kernel module, and it replaces the currently booted firmware when installed.
 
-## Build the USB keyboard firmware
+## Legacy C console
 
-Follow the separate build and install instructions in `circle-usb/README.md`. Circle must be cloned into `vendor/circle` and its libraries built first. The alternate firmware is tested only when run on Raspberry Pi hardware; it is not built by default.
+The original freestanding C UART console can still be built separately:
+
+```sh
+make legacy
+```
+
+This produces `kernel8-legacy.img`, which does not include USB keyboard support. The Circle USB build does not yet port the previous C kernel's SD/FAT32 loader or emulator features.
+
+USB hardware operation must be verified on a physical Pi 3B+; this project cannot test it in the source-only environment.

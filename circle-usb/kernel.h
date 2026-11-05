@@ -32,6 +32,9 @@ public:
 private:
     static void KeyPressedHandler(const char *text);
     static void KeyboardRemovedHandler(CDevice *device, void *context);
+    void HandleInput(const char *text);
+    void RunCommand(void);
+    void WriteText(const char *text);
 
     /* Keep Circle's required device initialization order. */
     CActLED m_ActLED;
@@ -45,6 +48,9 @@ private:
     CLogger m_Logger;
     CUSBHCIDevice m_USBHCI;
     CUSBKeyboardDevice * volatile m_pKeyboard;
+    char m_InputLine[80];
+    unsigned m_InputLength;
+    volatile TShutdownMode m_ShutdownMode;
 
     static CKernel *s_pThis;
 };
