@@ -21,3 +21,14 @@ _start:
     wfe
     b 2b
 .size _start, . - _start
+
+/* Demo callable from C when the user enters the "asm" command.
+   AArch64 returns a 32-bit integer in w0. */
+.section .text,"ax"
+.align 2
+.global asm_demo
+.type asm_demo, %function
+asm_demo:
+    mov w0, #42
+    ret
+.size asm_demo, . - asm_demo

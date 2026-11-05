@@ -4,6 +4,8 @@
 #include "picture.h"
 #include "uart.h"
 
+#include <stdint.h>
+
 #define LINE_CAPACITY 80u
 
 #define PM_BASE                     0x3F100000u
@@ -13,6 +15,8 @@
 #define PM_RSTC_WRCFG_MASK          (3u << 4)
 #define PM_RSTC_WRCFG_FULL_RESET    (2u << 4)
 #define PM_WDOG_TIMEOUT             10u
+
+extern uint32_t asm_demo(void);
 
 static int is_space(char ch)
 {
@@ -40,6 +44,7 @@ static void print_help(void)
     uart_puts("  status   Show current project status\n");
     uart_puts("  systems  List planned emulator systems\n");
     uart_puts("  image    Show a PNG image from the SD card on the video output\n");
+    uart_puts("  asm      Run the assembly demo routine\n");
     uart_puts("  reboot   Restart the emulator shell\n");
 }
 
@@ -51,6 +56,15 @@ static void run_image(void)
     if (!picture_load_sd_png("image.png", x, y)) {
         uart_puts("No image could be rendered from the SD card.\n");
     }
+}
+
+static void run_asm_demo(void)
+{
+    uint32_t result = asm_demo();
+
+    uart_puts("Assembly routine returned ");
+    uart_putc((char)('0' + (result % 10u)));
+    uart_puts(".\n");
 }
 
 static void run_reboot(void)
@@ -119,6 +133,8 @@ static void run_command(const char *line)
         uart_puts("Nintendo DS / DSi: prototype plans\n");
     } else if (command_equals(&line[start], length, "image")) {
         run_image();
+    } else if (command_equals(&line[start], length, "asm")) {
+        run_asm_demo();
     } else if (command_equals(&line[start], length, "reboot")) {
         run_reboot();
     } else {
