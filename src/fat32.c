@@ -25,25 +25,32 @@ static int is_power_of_two(uint32_t n)
     return n != 0u && (n & (n - 1u)) == 0u;
 }
 
-static int valid_bpb(struct fat32_volume *v, const uint8_t *b, uint32_t base)
+static int parse_bpb(struct fat32_volume *v, const uint8_t *b, uint32_t base,
+                     uint32_t partition_sectors)
 {
+    uint32_t total = get_le16(b + 19u);
+    uint32_t fat_size = get_le16(b + 22u);
     uint32_t bytes_per_sector = get_le16(b + 11u);
     uint32_t sectors_per_cluster = b[13];
     uint32_t reserved = get_le16(b + 14u);
     uint32_t fats = b[16];
-    uint32_t total = get_le16(b + 19u);
-    uint32_t fat_size = get_le16(b + 22u);
     uint32_t data_start;
+    uint32_t cluster_count;
 
     if (total == 0u) total = get_le32(b + 32u);
     if (fat_size == 0u) fat_size = get_le32(b + 36u);
     if (bytes_per_sector != SD_BLOCK_SIZE || !is_power_of_two(sectors_per_cluster) ||
         sectors_per_cluster > FAT32_MAX_SECTORS_PER_CLUSTER || reserved == 0u ||
-        fats == 0u || fat_size == 0u || total == 0u || get_le32(b + 44u) < 2u ||
-        b[510] != 0x55u || b[511] != 0xAAu) return 0;
+        fats == 0u || fat_size == 0u || total == 0u || get_le16(b + 17u) != 0u ||
+        get_le16(b + 22u) != 0u || get_le32(b + 36u) == 0u || get_le16(b + 42u) != 0u ||
+        get_le32(b + 44u) < 2u || b[510] != 0x55u || b[511] != 0xAAu) return 0;
 
     data_start = reserved + fats * fat_size;
-    if (data_start >= total || base > UINT32_MAX - total) return 0;
+    if (data_start >= total || total > partition_sectors || base > UINT32_MAX - total) return 0;
+    cluster_count = (total - data_start) / sectors_per_cluster;
+    if (cluster_count == 0u || get_le32(b + 44u) >= cluster_count + 2u) return 0;
+    if (fat_size * SD_BLOCK_SIZE / 4u < cluster_count + 2u) return 0;
+
     v->partition_lba = base;
     v->total_sectors = total;
     v->fat_lba = base + reserved;
@@ -51,9 +58,8 @@ static int valid_bpb(struct fat32_volume *v, const uint8_t *b, uint32_t base)
     v->first_data_sector = base + data_start;
     v->sectors_per_cluster = sectors_per_cluster;
     v->cluster_size_bytes = sectors_per_cluster * SD_BLOCK_SIZE;
-    if (v->cluster_size_bytes > FAT32_MAX_CLUSTER_BYTES) return 0;
     v->root_cluster = get_le32(b + 44u) & 0x0FFFFFFFu;
-    return 1;
+    return v->cluster_size_bytes <= FAT32_MAX_CLUSTER_BYTES;
 }
 
 bool fat32_mount(struct fat32_volume *volume)
@@ -64,17 +70,15 @@ bool fat32_mount(struct fat32_volume *volume)
     if (volume == NULL || !sd_init() || !sd_read_block(0u, sector)) return false;
     if (sector[510] != 0x55u || sector[511] != 0xAAu) return false;
 
-    /* Accept a superfloppy BPB, otherwise search primary MBR partitions. */
-    if (valid_bpb(volume, sector, 0u)) return true;
-    for (i = 0; i < 4u; ++i) {
+    /* Accept a FAT32 superfloppy or locate a primary MBR FAT32 partition. */
+    if (parse_bpb(volume, sector, 0u, UINT32_MAX)) return true;
+    for (i = 0u; i < 4u; ++i) {
         const uint8_t *entry = sector + 446u + i * 16u;
         uint8_t type = entry[4];
         uint32_t start = get_le32(entry + 8u);
         uint32_t count = get_le32(entry + 12u);
         if ((type == 0x0Bu || type == 0x0Cu) && start != 0u && count != 0u &&
-            sd_read_block(start, sector) && valid_bpb(volume, sector, start)) {
-            if (volume->total_sectors <= count) return true;
-        }
+            sd_read_block(start, sector) && parse_bpb(volume, sector, start, count)) return true;
     }
     return false;
 }
@@ -90,30 +94,27 @@ static uint32_t next_cluster(const struct fat32_volume *v, uint32_t cluster)
 
 static void make_short_name(const char *text, char name[11], int *valid)
 {
-    unsigned base = 0u, ext = 0u;
+    unsigned base = 0u, ext = 0u, i;
     int after_dot = 0;
-    unsigned i;
-
-    for (i = 0; i < 11u; ++i) name[i] = ' ';
+    for (i = 0u; i < 11u; ++i) name[i] = ' ';
     *valid = 1;
     if (text == NULL || text[0] == '\0') { *valid = 0; return; }
-    for (i = 0; text[i] != '\0'; ++i) {
+    for (i = 0u; text[i] != '\0'; ++i) {
         char c = text[i];
         if (c == '.') {
             if (after_dot || base == 0u) { *valid = 0; return; }
             after_dot = 1;
-            continue;
-        }
-        if (c == '/' || c == '\\' || c == ' ' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
-            *valid = 0; return;
-        }
-        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
-        if (after_dot) {
-            if (++ext > 3u) { *valid = 0; return; }
-            name[8u + ext - 1u] = c;
         } else {
-            if (++base > 8u) { *valid = 0; return; }
-            name[base - 1u] = c;
+            if (c == '/' || c == '\\' || c == ' ' || c == ':' || c == '*' || c == '?' ||
+                c == '"' || c == '<' || c == '>' || c == '|') { *valid = 0; return; }
+            if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+            if (after_dot) {
+                if (++ext > 3u) { *valid = 0; return; }
+                name[8u + ext - 1u] = c;
+            } else {
+                if (++base > 8u) { *valid = 0; return; }
+                name[base - 1u] = c;
+            }
         }
     }
     if (base == 0u) *valid = 0;
@@ -139,18 +140,13 @@ static int find_entry(const struct fat32_volume *v, uint32_t dir_cluster,
                 !sd_read_block(lba, sector)) return 0;
             for (slot = 0u; slot < SD_BLOCK_SIZE; slot += 32u) {
                 const uint8_t *entry = sector + slot;
+                unsigned k;
                 if (entry[0] == 0u) return 0;
                 if (entry[0] == 0xE5u || entry[11] == 0x0Fu || (entry[11] & 0x08u)) continue;
-                if (entry[11] & 0x10u) {
-                    /* Directories are matched too, for path traversal. */
-                }
-                {
-                    unsigned k;
-                    for (k = 0u; k < 11u && entry[k] == (uint8_t)wanted[k]; ++k) { }
-                    if (k == 11u) {
-                        for (k = 0u; k < 32u; ++k) found[k] = entry[k];
-                        return 1;
-                    }
+                for (k = 0u; k < 11u && entry[k] == (uint8_t)wanted[k]; ++k) { }
+                if (k == 11u) {
+                    for (k = 0u; k < 32u; ++k) found[k] = entry[k];
+                    return 1;
                 }
             }
         }
@@ -197,8 +193,8 @@ bool fat32_load_file(struct fat32_volume *v, const char *path,
             directory = first_cluster;
             continue;
         }
-
         if (entry[11] & 0x10u) return false;
+
         {
             uint32_t remaining = get_le32(entry + 28u);
             uint32_t cluster = first_cluster;

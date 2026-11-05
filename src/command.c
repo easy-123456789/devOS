@@ -1,7 +1,6 @@
 #include "command.h"
 #include "fat32.h"
 #include "mmio.h"
-#include "sd.h"
 #include "uart.h"
 
 #include <stddef.h>
@@ -27,7 +26,7 @@ static int is_space(char ch)
 
 static int command_equals(const char *start, unsigned length, const char *word)
 {
-    unsigned i = 0;
+    unsigned i = 0u;
     while (i < length && word[i] != '\0') {
         if (start[i] != word[i]) return 0;
         ++i;
@@ -49,7 +48,6 @@ static void run_load(const char *path)
 {
     struct fat32_volume volume;
     size_t size = 0u;
-
     if (!fat32_mount(&volume)) {
         uart_puts("SD card/FAT32 mount failed.\n");
         return;
@@ -59,7 +57,6 @@ static void run_load(const char *path)
         return;
     }
     uart_puts("Loaded ");
-    /* Print a bounded decimal size without requiring libc. */
     {
         char digits[10];
         unsigned n = 0u;
@@ -112,6 +109,7 @@ static void run_command(const char *line)
             uart_puts("Usage: load <path>\n");
             return;
         }
+        line[path_end] = '\0';
         run_load(&line[path_start]);
         return;
     }
