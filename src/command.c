@@ -28,6 +28,18 @@ static void print_help(void)
     uart_puts("  help     Show this help\n");
     uart_puts("  status   Show current project status\n");
     uart_puts("  systems  List planned emulator systems\n");
+    uart_puts("  reboot   Restart the emulator shell\n");
+}
+
+static void run_reboot(void)
+{
+    uart_puts("Rebooting...\n");
+
+    /*
+     * A real hardware reboot would reset the SoC or trigger the watchdog.
+     * This stub keeps the shell behavior consistent until the platform reset
+     * code is implemented.
+     */
 }
 
 static void run_command(const char *line)
@@ -72,6 +84,8 @@ static void run_command(const char *line)
         uart_puts("Game Boy Color: planned\n");
         uart_puts("Game Boy Advance: header checker only\n");
         uart_puts("Nintendo DS / DSi: prototype plans\n");
+    } else if (command_equals(&line[start], length, "reboot")) {
+        run_reboot();
     } else {
         uart_puts("Unknown command. Type 'help'.\n");
     }
