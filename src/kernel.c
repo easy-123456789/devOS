@@ -1,9 +1,14 @@
+#include "command.h"
 #include "console.h"
 #include "framebuffer.h"
+#include "uart.h"
 
 void kernel_main(void)
 {
+    uart_init();
+
     if (!framebuffer_init()) {
+        uart_puts("Framebuffer initialization failed.\n");
         for (;;) {
             __asm__ volatile("wfe");
         }
@@ -11,7 +16,6 @@ void kernel_main(void)
 
     console_init();
     console_write("RPI 3B+  |  BARE-METAL CONSOLE");
-    console_newline();
     console_newline();
     console_write("Booted directly on the Raspberry Pi.");
     console_newline();
@@ -28,10 +32,6 @@ void kernel_main(void)
     console_newline();
     console_write("[--] ROM loading and GBA emulation are not implemented");
     console_newline();
-    console_newline();
-    console_write("Next: SD ROM loading, then GBA CPU and graphics.");
 
-    for (;;) {
-        __asm__ volatile("wfe");
-    }
+    command_loop();
 }
