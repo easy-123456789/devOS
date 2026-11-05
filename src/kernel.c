@@ -24,10 +24,12 @@ void kernel_main(void)
     console_newline();
     console_write("[OK] Framebuffer initialized");
     console_newline();
-    console_write("[--] Emulator cores are not implemented yet");
+    console_write("[OK] GBA cartridge header checker included");
+    console_newline();
+    console_write("[--] ROM loading and GBA emulation are not implemented");
     console_newline();
     console_newline();
-    console_write("Next: input, SD storage, then GB/GBC core.");
+    console_write("Next: SD ROM loading, then GBA CPU and graphics.");
 
     for (;;) {
         __asm__ volatile("wfe");
