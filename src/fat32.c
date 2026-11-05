@@ -3,231 +3,224 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
-#define FAT32_SECTOR_SIZE 512u
-#define FAT32_ENTRY_SIZE 32u
-#define FAT32_END_OF_CHAIN 0x0FFFFFF8u
-#define FAT32_BAD_CLUSTER  0x0FFFFFF7u
+#define FAT32_EOC 0x0FFFFFF8u
+#define FAT32_BAD 0x0FFFFFF7u
+#define FAT32_MAX_SECTORS_PER_CLUSTER 128u
+#define FAT32_MAX_CLUSTER_BYTES 65536u
 
-static uint32_t fat32_cluster_value(const struct fat32_volume *volume, uint32_t cluster)
+static uint16_t get_le16(const uint8_t *p)
 {
-    uint32_t fat_offset = cluster * 4u;
-    uint32_t fat_sector = volume->reserved_sectors + (fat_offset / volume->bytes_per_sector);
-    uint8_t sector[FAT32_SECTOR_SIZE];
-    uint32_t value;
-
-    if (!sd_read_block(fat_sector, sector)) {
-        return FAT32_BAD_CLUSTER;
-    }
-
-    value = *(const uint32_t *)(const void *)(sector + (fat_offset % volume->bytes_per_sector));
-    return value;
+    return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8u));
 }
 
-static bool fat32_read_cluster(const struct fat32_volume *volume, uint32_t cluster, uint8_t *buffer)
+static uint32_t get_le32(const uint8_t *p)
 {
-    uint32_t first_sector;
-    uint32_t sector_index;
-
-    if (cluster < 2u) {
-        return false;
-    }
-
-    first_sector = volume->first_data_sector + (cluster - 2u) * volume->sectors_per_cluster;
-    for (sector_index = 0u; sector_index < volume->sectors_per_cluster; ++sector_index) {
-        if (!sd_read_block(first_sector + sector_index, buffer + (sector_index * FAT32_SECTOR_SIZE))) {
-            return false;
-        }
-    }
-    return true;
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8u) |
+           ((uint32_t)p[2] << 16u) | ((uint32_t)p[3] << 24u);
 }
 
-static void fat32_uppercase(char *dst, size_t dst_size, const char *src)
+static int is_power_of_two(uint32_t n)
 {
-    size_t i = 0u;
-
-    while (src[i] != '\0' && i + 1u < dst_size) {
-        char ch = src[i];
-        if (ch >= 'a' && ch <= 'z') {
-            ch = (char)(ch - 'a' + 'A');
-        }
-        dst[i] = ch;
-        ++i;
-    }
-    dst[i] = '\0';
+    return n != 0u && (n & (n - 1u)) == 0u;
 }
 
-static bool fat32_name_matches(const uint8_t *entry, const char *name)
+static int valid_bpb(struct fat32_volume *v, const uint8_t *b, uint32_t base)
 {
-    char short_name[13];
-    unsigned i = 0u;
-    unsigned j = 0u;
+    uint32_t bytes_per_sector = get_le16(b + 11u);
+    uint32_t sectors_per_cluster = b[13];
+    uint32_t reserved = get_le16(b + 14u);
+    uint32_t fats = b[16];
+    uint32_t total = get_le16(b + 19u);
+    uint32_t fat_size = get_le16(b + 22u);
+    uint32_t data_start;
 
-    while (i < 8u && entry[i] != ' ') {
-        short_name[j++] = (char)entry[i++];
-    }
-    if (entry[8u] != ' ') {
-        short_name[j++] = '.';
-        i = 8u;
-        while (i < 11u && entry[i] != ' ') {
-            short_name[j++] = (char)entry[i++];
-        }
-    }
-    short_name[j] = '\0';
-    fat32_uppercase(short_name, sizeof(short_name), short_name);
-    return strcmp(short_name, name) == 0;
+    if (total == 0u) total = get_le32(b + 32u);
+    if (fat_size == 0u) fat_size = get_le32(b + 36u);
+    if (bytes_per_sector != SD_BLOCK_SIZE || !is_power_of_two(sectors_per_cluster) ||
+        sectors_per_cluster > FAT32_MAX_SECTORS_PER_CLUSTER || reserved == 0u ||
+        fats == 0u || fat_size == 0u || total == 0u || get_le32(b + 44u) < 2u ||
+        b[510] != 0x55u || b[511] != 0xAAu) return 0;
+
+    data_start = reserved + fats * fat_size;
+    if (data_start >= total || base > UINT32_MAX - total) return 0;
+    v->partition_lba = base;
+    v->total_sectors = total;
+    v->fat_lba = base + reserved;
+    v->fat_size_sectors = fat_size;
+    v->first_data_sector = base + data_start;
+    v->sectors_per_cluster = sectors_per_cluster;
+    v->cluster_size_bytes = sectors_per_cluster * SD_BLOCK_SIZE;
+    if (v->cluster_size_bytes > FAT32_MAX_CLUSTER_BYTES) return 0;
+    v->root_cluster = get_le32(b + 44u) & 0x0FFFFFFFu;
+    return 1;
 }
 
-bool fat32_init(struct fat32_volume *volume, const uint8_t *boot_sector)
+bool fat32_mount(struct fat32_volume *volume)
 {
-    uint16_t bytes_per_sector;
-    uint16_t reserved_sectors;
-    uint8_t sectors_per_cluster;
-    uint8_t num_fats;
-    uint32_t total_sectors;
-    uint32_t fat_size_sectors;
-    uint32_t root_cluster;
+    uint8_t sector[SD_BLOCK_SIZE];
+    unsigned i;
 
-    if (volume == NULL || boot_sector == NULL) {
-        return false;
-    }
+    if (volume == NULL || !sd_init() || !sd_read_block(0u, sector)) return false;
+    if (sector[510] != 0x55u || sector[511] != 0xAAu) return false;
 
-    bytes_per_sector = (uint16_t)((uint16_t)boot_sector[11] | ((uint16_t)boot_sector[12] << 8u));
-    sectors_per_cluster = boot_sector[13];
-    reserved_sectors = (uint16_t)((uint16_t)boot_sector[14] | ((uint16_t)boot_sector[15] << 8u));
-    num_fats = boot_sector[16];
-    total_sectors = (uint32_t)((uint32_t)boot_sector[19] | ((uint32_t)boot_sector[20] << 8u) |
-                               ((uint32_t)boot_sector[21] << 16u) | ((uint32_t)boot_sector[22] << 24u));
-    fat_size_sectors = *(const uint32_t *)(const void *)(boot_sector + 0x24u);
-    root_cluster = *(const uint32_t *)(const void *)(boot_sector + 0x2Cu);
-
-    if (bytes_per_sector == 0u || sectors_per_cluster == 0u) {
-        return false;
-    }
-
-    volume->bytes_per_sector = (uint32_t)bytes_per_sector;
-    volume->sectors_per_cluster = (uint32_t)sectors_per_cluster;
-    volume->reserved_sectors = (uint32_t)reserved_sectors;
-    volume->fat_count = (uint32_t)num_fats;
-    volume->fat_size_sectors = fat_size_sectors;
-    volume->root_cluster = root_cluster;
-    volume->first_data_sector = volume->reserved_sectors + (volume->fat_count * volume->fat_size_sectors);
-    volume->total_sectors = total_sectors;
-    volume->cluster_size_bytes = volume->bytes_per_sector * volume->sectors_per_cluster;
-    return true;
-}
-
-bool fat32_find_file(struct fat32_volume *volume, const char *name, struct fat32_file *file)
-{
-    uint32_t cluster = volume->root_cluster;
-    uint32_t current = 0u;
-    uint8_t cluster_data[4096];
-
-    if (volume == NULL || name == NULL || file == NULL) {
-        return false;
-    }
-
-    while (cluster >= 2u && cluster < FAT32_END_OF_CHAIN) {
-        uint32_t entry_index;
-        if (!fat32_read_cluster(volume, cluster, cluster_data)) {
-            return false;
+    /* Accept a superfloppy BPB, otherwise search primary MBR partitions. */
+    if (valid_bpb(volume, sector, 0u)) return true;
+    for (i = 0; i < 4u; ++i) {
+        const uint8_t *entry = sector + 446u + i * 16u;
+        uint8_t type = entry[4];
+        uint32_t start = get_le32(entry + 8u);
+        uint32_t count = get_le32(entry + 12u);
+        if ((type == 0x0Bu || type == 0x0Cu) && start != 0u && count != 0u &&
+            sd_read_block(start, sector) && valid_bpb(volume, sector, start)) {
+            if (volume->total_sectors <= count) return true;
         }
-
-        for (entry_index = 0u; entry_index < volume->cluster_size_bytes; entry_index += FAT32_ENTRY_SIZE) {
-            uint8_t *entry = cluster_data + entry_index;
-            char normalized[13];
-            uint8_t attr = entry[11];
-            uint32_t first_cluster;
-            uint32_t size_bytes;
-
-            if (entry[0] == 0x00u) {
-                return false;
-            }
-            if (entry[0] == 0xE5u) {
-                continue;
-            }
-            if ((attr & 0x0Fu) == 0x0Fu) {
-                continue;
-            }
-            if (attr & 0x08u) {
-                continue;
-            }
-
-            if (entry[11] == 0x0Fu) {
-                continue;
-            }
-
-            fat32_uppercase(normalized, sizeof(normalized), (const char *)entry);
-            if (memcmp(normalized, name, strlen(name) + 1u) == 0) {
-                first_cluster = (uint32_t)entry[26] | ((uint32_t)entry[27] << 8u);
-                size_bytes = (uint32_t)entry[28] | ((uint32_t)entry[29] << 8u) |
-                             ((uint32_t)entry[30] << 16u) | ((uint32_t)entry[31] << 24u);
-                file->first_cluster = first_cluster;
-                file->size_bytes = size_bytes;
-                file->current_cluster = first_cluster;
-                file->current_offset = 0u;
-                return true;
-            }
-        }
-
-        current = fat32_cluster_value(volume, cluster);
-        if (current >= FAT32_END_OF_CHAIN || current == FAT32_BAD_CLUSTER) {
-            break;
-        }
-        cluster = current;
     }
-
     return false;
 }
 
-bool fat32_read_file(struct fat32_volume *volume, const struct fat32_file *file,
-                     uint8_t *buffer, size_t buffer_size, size_t *bytes_read)
+static uint32_t next_cluster(const struct fat32_volume *v, uint32_t cluster)
 {
-    uint32_t cluster = file->first_cluster;
-    size_t total = 0u;
-    uint8_t cluster_data[4096];
-    uint32_t remaining = file->size_bytes;
+    uint8_t sector[SD_BLOCK_SIZE];
+    uint32_t offset = cluster * 4u;
+    uint32_t lba = v->fat_lba + offset / SD_BLOCK_SIZE;
+    if (lba >= v->first_data_sector || !sd_read_block(lba, sector)) return FAT32_BAD;
+    return get_le32(sector + offset % SD_BLOCK_SIZE) & 0x0FFFFFFFu;
+}
 
-    if (volume == NULL || file == NULL || buffer == NULL) {
-        return false;
-    }
+static void make_short_name(const char *text, char name[11], int *valid)
+{
+    unsigned base = 0u, ext = 0u;
+    int after_dot = 0;
+    unsigned i;
 
-    while (cluster >= 2u && cluster < FAT32_END_OF_CHAIN && remaining > 0u) {
-        uint32_t to_copy;
-        uint32_t cluster_index;
-
-        if (!fat32_read_cluster(volume, cluster, cluster_data)) {
-            return false;
+    for (i = 0; i < 11u; ++i) name[i] = ' ';
+    *valid = 1;
+    if (text == NULL || text[0] == '\0') { *valid = 0; return; }
+    for (i = 0; text[i] != '\0'; ++i) {
+        char c = text[i];
+        if (c == '.') {
+            if (after_dot || base == 0u) { *valid = 0; return; }
+            after_dot = 1;
+            continue;
         }
-
-        to_copy = volume->cluster_size_bytes;
-        if (to_copy > remaining) {
-            to_copy = remaining;
+        if (c == '/' || c == '\\' || c == ' ' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+            *valid = 0; return;
         }
-        if (to_copy > buffer_size - total) {
-            to_copy = (uint32_t)(buffer_size - total);
-        }
-
-        for (cluster_index = 0u; cluster_index < to_copy; ++cluster_index) {
-            buffer[total + cluster_index] = cluster_data[cluster_index];
-        }
-
-        total += (size_t)to_copy;
-        remaining -= to_copy;
-
-        if (remaining == 0u) {
-            break;
-        }
-
-        cluster = fat32_cluster_value(volume, cluster);
-        if (cluster == FAT32_BAD_CLUSTER || cluster >= FAT32_END_OF_CHAIN) {
-            break;
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        if (after_dot) {
+            if (++ext > 3u) { *valid = 0; return; }
+            name[8u + ext - 1u] = c;
+        } else {
+            if (++base > 8u) { *valid = 0; return; }
+            name[base - 1u] = c;
         }
     }
+    if (base == 0u) *valid = 0;
+}
 
-    if (bytes_read != NULL) {
-        *bytes_read = total;
+static int find_entry(const struct fat32_volume *v, uint32_t dir_cluster,
+                      const char *name_text, uint8_t found[32])
+{
+    char wanted[11];
+    int valid;
+    uint32_t cluster = dir_cluster;
+    uint32_t clusters_left = v->total_sectors / v->sectors_per_cluster;
+    make_short_name(name_text, wanted, &valid);
+    if (!valid) return 0;
+
+    while (cluster >= 2u && cluster < FAT32_EOC && clusters_left-- != 0u) {
+        uint32_t sector_index;
+        for (sector_index = 0u; sector_index < v->sectors_per_cluster; ++sector_index) {
+            uint8_t sector[SD_BLOCK_SIZE];
+            uint32_t lba = v->first_data_sector + (cluster - 2u) * v->sectors_per_cluster + sector_index;
+            unsigned slot;
+            if (lba < v->first_data_sector || lba >= v->partition_lba + v->total_sectors ||
+                !sd_read_block(lba, sector)) return 0;
+            for (slot = 0u; slot < SD_BLOCK_SIZE; slot += 32u) {
+                const uint8_t *entry = sector + slot;
+                if (entry[0] == 0u) return 0;
+                if (entry[0] == 0xE5u || entry[11] == 0x0Fu || (entry[11] & 0x08u)) continue;
+                if (entry[11] & 0x10u) {
+                    /* Directories are matched too, for path traversal. */
+                }
+                {
+                    unsigned k;
+                    for (k = 0u; k < 11u && entry[k] == (uint8_t)wanted[k]; ++k) { }
+                    if (k == 11u) {
+                        for (k = 0u; k < 32u; ++k) found[k] = entry[k];
+                        return 1;
+                    }
+                }
+            }
+        }
+        cluster = next_cluster(v, cluster);
+        if (cluster == FAT32_BAD || cluster >= FAT32_EOC) break;
     }
-    return true;
+    return 0;
+}
+
+bool fat32_load_file(struct fat32_volume *v, const char *path,
+                     void *buffer, size_t capacity, size_t *file_size)
+{
+    uint8_t entry[32];
+    uint8_t *out = (uint8_t *)buffer;
+    uint32_t directory;
+    size_t written = 0u;
+    const char *component;
+
+    if (v == NULL || path == NULL || buffer == NULL) return false;
+    directory = v->root_cluster;
+    component = path;
+
+    for (;;) {
+        char part[13];
+        size_t n = 0u;
+        int last;
+        uint32_t first_cluster;
+        while (*component == '/' || *component == '\\') ++component;
+        while (component[n] != '\0' && component[n] != '/' && component[n] != '\\') {
+            if (n >= sizeof(part) - 1u) return false;
+            part[n] = component[n];
+            ++n;
+        }
+        if (n == 0u) return false;
+        part[n] = '\0';
+        component += n;
+        while (*component == '/' || *component == '\\') ++component;
+        last = (*component == '\0');
+
+        if (!find_entry(v, directory, part, entry)) return false;
+        first_cluster = ((uint32_t)get_le16(entry + 20u) << 16u) | get_le16(entry + 26u);
+        if (!last) {
+            if (!(entry[11] & 0x10u) || first_cluster < 2u) return false;
+            directory = first_cluster;
+            continue;
+        }
+
+        if (entry[11] & 0x10u) return false;
+        {
+            uint32_t remaining = get_le32(entry + 28u);
+            uint32_t cluster = first_cluster;
+            uint32_t clusters_left = v->total_sectors / v->sectors_per_cluster;
+            if ((size_t)remaining > capacity) return false;
+            while (remaining != 0u) {
+                uint32_t sector_index;
+                if (cluster < 2u || cluster >= FAT32_EOC || clusters_left-- == 0u) return false;
+                for (sector_index = 0u; sector_index < v->sectors_per_cluster && remaining != 0u; ++sector_index) {
+                    uint8_t sector[SD_BLOCK_SIZE];
+                    uint32_t lba = v->first_data_sector + (cluster - 2u) * v->sectors_per_cluster + sector_index;
+                    uint32_t copy = remaining < SD_BLOCK_SIZE ? remaining : SD_BLOCK_SIZE;
+                    uint32_t j;
+                    if (lba >= v->partition_lba + v->total_sectors || !sd_read_block(lba, sector)) return false;
+                    for (j = 0u; j < copy; ++j) out[written + j] = sector[j];
+                    written += copy;
+                    remaining -= copy;
+                }
+                if (remaining != 0u) cluster = next_cluster(v, cluster);
+            }
+        }
+        if (file_size != NULL) *file_size = written;
+        return true;
+    }
 }
