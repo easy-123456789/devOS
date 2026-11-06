@@ -1,5 +1,4 @@
-# Bare-metal Raspberry Pi 3B+ console with USB keyboard
-
+# Game-Develop-Playing Operating System
 The default build creates an AArch64 bare-metal firmware image for Raspberry Pi 3B+ with USB HID keyboard support, using Circle's DWC2 host controller, built-in hub, and keyboard driver. It provides a small keyboard-driven shell (`help`, `status`, `systems`, `reboot`) on the HDMI display.
 
 ## Build the default USB-keyboard firmware
