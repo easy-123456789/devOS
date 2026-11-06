@@ -1,5 +1,2 @@
-*.o
-*.elf
-*.img
-.DS_Store
-vendor/
+# x86-64 kernel build output
+/platforms/x86_64_uefi/build/
