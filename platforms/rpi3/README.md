@@ -1,9 +1,14 @@
-# Raspberry Pi 3B+ target
+# Raspberry Pi 3B+ platform
 
-This folder holds the platform-specific assumptions for the currently working build.
+This is the current supported platform. The Raspberry Pi-specific assumptions live here so they do not contaminate the broader project.
 
-- This repository already targets the Raspberry Pi 3B+ AArch64 boot flow.
-- The current source files are still the same and remain compatible with this target.
-- Do not treat this as a generic PC platform.
+## Scope
 
-The Pi target remains the baseline until a separate UEFI/x86-64 target is implemented.
+- AArch64 boot flow
+- Pi memory map and registers
+- Circle USB support
+- Raspberry Pi SD card and GPIO assumptions
+
+## Policy
+
+The kernel source remains the same as before. The Pi-specific platform code stays isolated so the rest of the project can evolve toward broader machine support without rewriting the core OS logic.

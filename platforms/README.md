@@ -1,31 +1,22 @@
-# devOS platform model
+# Platform isolation model
 
-This repository is still structured around a Raspberry Pi 3B+ target, but the build system is being prepared for a multi-platform model.
+This repository is organized around a simple rule: keep the Raspberry Pi code isolated, and build any future universal support as platform-specific layers on top of shared logic.
 
-## Principle
+## Current platform
 
-Keep the shared kernel logic hardware-neutral where possible, and isolate architecture-specific code into platform-specific directories. The current source files remain the same; platform-specific logic is layered on top of them.
+- `platforms/rpi3/` : the current supported target. The Raspberry Pi 3B+ code and build assumptions remain here.
 
-## Current supported target
+## Planned platform
 
-- `platforms/rpi3/`
-  - Contains the Raspberry Pi-specific boot and driver assumptions.
-  - This is the currently supported build target.
+- `platforms/x86_64_uefi/` : future target for Minisforum and generic x86-64 UEFI PCs. This is intentionally separate from the Pi code and will require a different boot contract.
 
-## Future targets
+## Shared code policy
 
-- `platforms/x86_64_uefi/`
-  - Planned target for Minisforum and generic x86-64 UEFI machines.
-  - Requires a new boot contract, loader, and drivers.
+Place only hardware-neutral logic in the top-level shared code. Anything that depends on Pi GPIO, the ARM boot flow, Circle, or the Pi memory map stays inside the Pi platform directory. When a future port is developed, it will have its own targeted startup, driver, and build files, rather than modifying the existing Pi source.
 
-- `platforms/generic_pc/`
-  - Placeholder for broader compatibility work.
+## Build entry point
 
-## Build contract
-
-Use the build coordinator script at `scripts/universal_build.py` to select a target without altering the existing kernel source.
-
-Example:
+Use the build coordinator script to select a target without changing the existing kernel source files:
 
 ```sh
 python3 scripts/universal_build.py --target pi3

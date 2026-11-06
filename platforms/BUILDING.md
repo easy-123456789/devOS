@@ -1,6 +1,6 @@
-# devOS universal build entries
+# devOS platform build notes
 
-This is a small wrapper around the build coordinator.
+This is the platform-based build entry point.
 
 ## Current supported target
 
@@ -8,9 +8,10 @@ This is a small wrapper around the build coordinator.
 python3 scripts/universal_build.py --target pi3
 ```
 
-## Planned targets
+## Planned future target
 
 ```sh
 python3 scripts/universal_build.py --target x86_64_uefi
-python3 scripts/universal_build.py --target generic_pc
 ```
+
+The current kernel source stays as-is. Only the platform-specific boot and driver layer is isolated and expanded.
