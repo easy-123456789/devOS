@@ -21,4 +21,3 @@ make legacy
 
 This produces `kernel8-legacy.img`, which does not include USB keyboard support. The Circle USB build does not yet port the previous C kernel's SD/FAT32 loader or emulator features.
 
-USB hardware operation must be verified on a physical Pi 3B+; this project cannot test it in the source-only environment.
