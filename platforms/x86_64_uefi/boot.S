@@ -1,6 +1,6 @@
 /* Multiboot2 entry and 32-bit-to-64-bit bootstrap.
  * GRUB enters in 32-bit protected mode with EAX=magic and EBX=info pointer.
- * The bootstrap identity-maps the first 1 GiB using 2 MiB pages.
+ * The bootstrap maps the first 4 GiB using 2 MiB identity-mapped pages.
  */
 .set MB2_HEADER_MAGIC, 0xE85250D6
 .set MB2_BOOT_MAGIC,   0x36D76289
@@ -12,6 +12,13 @@ mb2_header_start:
     .long 0
     .long mb2_header_end - mb2_header_start
     .long -(MB2_HEADER_MAGIC + (mb2_header_end - mb2_header_start))
+    /* Ask GRUB for a 1024x768x32 framebuffer when available. */
+    .short 5
+    .short 1                         /* Optional request. */
+    .long 20
+    .long 1024
+    .long 768
+    .long 32
     /* Required end tag. */
     .short 0
     .short 0
@@ -25,20 +32,28 @@ mb2_header_end:
 _start:
     cli
     cld
-    movl %eax, boot_magic(%rip)
-    movl %ebx, boot_info(%rip)
+    movl $boot_magic, %edi
+    movl %eax, (%edi)
+    movl $boot_info, %edi
+    movl %ebx, (%edi)
 
-    /* Build PML4 -> PDPT -> one page directory mapping 0..1 GiB. */
-    movl $(boot_pdpt + 3), %eax
-    movl %eax, boot_pml4
-    movl $0, boot_pml4 + 4
-    movl $(boot_pd + 3), %eax
+    /* Four PDPT entries point to four page directories, mapping 4 GiB. */
+    movl $(boot_pd0 + 3), %eax
     movl %eax, boot_pdpt
     movl $0, boot_pdpt + 4
+    movl $(boot_pd1 + 3), %eax
+    movl %eax, boot_pdpt + 8
+    movl $0, boot_pdpt + 12
+    movl $(boot_pd2 + 3), %eax
+    movl %eax, boot_pdpt + 16
+    movl $0, boot_pdpt + 20
+    movl $(boot_pd3 + 3), %eax
+    movl %eax, boot_pdpt + 24
+    movl $0, boot_pdpt + 28
 
-    movl $boot_pd, %edi
+    movl $boot_pd0, %edi
     xorl %eax, %eax
-    movl $512, %ecx
+    movl $2048, %ecx
 1:
     movl %eax, (%edi)
     orl $0x83, (%edi)               /* Present, writable, 2 MiB page. */
@@ -59,7 +74,7 @@ _start:
     orl $0x100, %eax
     wrmsr
 
-    lgdt gdt64_pointer
+    lgdt boot_gdt_pointer
     movl %cr0, %eax
     orl $0x80000000, %eax           /* CR0.PG */
     movl %eax, %cr0
@@ -109,7 +124,13 @@ boot_pml4:
     .skip 4096
 boot_pdpt:
     .skip 4096
-boot_pd:
+boot_pd0:
+    .skip 4096
+boot_pd1:
+    .skip 4096
+boot_pd2:
+    .skip 4096
+boot_pd3:
     .skip 4096
 .balign 16
 boot_stack:
